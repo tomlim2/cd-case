@@ -3,7 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview" },
-  "dependencies": { "three": "^0.186.1" },
-  "devDependencies": { "vite": "^8.3.2" }
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "postversion": "git push --follow-tags"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.2"
+  },
+  "description": "오늘의 디스크: 날마다 한 장씩 구워지는 가짜 음반. 투명 케이스는 셰이더로 그렸다."
 }

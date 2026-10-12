@@ -3,8 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="description" content="셰이더만으로 그린 투명 주얼 케이스. 모델 파일 없이 three.js와 GLSL로 플라스틱의 굴절, 디스크의 회절 무지개, 뚜껑 여닫는 움직임을 만들었습니다." />
-    <title>Jewel Case</title>
+    <meta name="description" content="날마다 한 장씩 구워지는 가짜 음반. 시드 하나로 커버·디스크·수록곡이 만들어지고, 제목과 이미지를 넣어 내 앨범으로 바꿀 수 있습니다. 투명 케이스는 모델 파일 없이 셰이더로 그렸습니다." />
+    <meta property="og:title" content="오늘의 디스크" />
+    <meta property="og:description" content="날마다 한 장씩 구워지는 가짜 음반. Every day a new record that does not exist, in a jewel case drawn with shaders." />
+    <title>오늘의 디스크</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23101014'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%237fd6ff' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23fff'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -15,35 +17,80 @@
       <p class="sr" id="live" aria-live="polite"></p>
 
       <header class="corner">
-        <h1>Jewel Case</h1>
-        <p>three.js + GLSL · 모델 파일 없음</p>
+        <h1>오늘의 디스크</h1>
+        <p class="date">
+          <button type="button" id="prev" aria-label="하루 전 디스크" title="하루 전 (←)">‹</button>
+          <span id="stamp"></span>
+          <button type="button" id="next" aria-label="하루 뒤 디스크" title="하루 뒤 (→)">›</button>
+        </p>
+        <p class="now" id="caption"></p>
       </header>
 
-      <p class="hint" aria-hidden="true">케이스를 누르면 열려요 · 끌어서 돌려보세요</p>
+      <p class="hint" id="hint" aria-hidden="true">케이스를 누르면 열려요 · 끌어서 뒤집어 보세요</p>
 
-      <nav class="dock" aria-label="디스크 고르기">
-        <div class="rail" id="rail"></div>
+      <nav class="dock" aria-label="조작">
+        <button type="button" class="pill" id="shuffle" title="아무 디스크나 (R)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3c3.4 0 5 10 8.6 10H20M17.2 14.2 20 17l-2.8 2.8M4 17h3c1.2 0 2.2-1.1 3-2.7M13.5 9.8c.8-1.7 1.8-2.8 3.1-2.8H20M17.2 4.2 20 7l-2.8 2.8" /></svg>
+          <span>다른 디스크</span>
+        </button>
+        <button type="button" class="pill" id="edit" aria-expanded="false" aria-controls="editor" title="내 앨범으로 꾸미기 (E)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 1-4.2L16.4 4.4a1.9 1.9 0 0 1 2.7 0l.5.5a1.9 1.9 0 0 1 0 2.7L9.2 18zM14.3 6.5l3.2 3.2" /></svg>
+          <span>꾸미기</span>
+        </button>
         <span class="rule" aria-hidden="true"></span>
-        <button type="button" class="tool" id="spin" aria-label="디스크 회전" aria-pressed="true" title="디스크 회전 (S)">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="8.25" />
-            <circle cx="12" cy="12" r="1.7" />
-            <path d="M5.9 9.4a6.6 6.6 0 0 1 3.5-3.5M18.1 14.6a6.6 6.6 0 0 1-3.5 3.5" />
-          </svg>
-        </button>
         <button type="button" class="tool" id="open" aria-label="케이스 열기" aria-pressed="false" title="열기 / 닫기 (O)">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="4.2" y="10.8" width="15.6" height="8.6" rx="1.8" />
-            <path d="M4.6 9.3 18 4.4M9.2 15.1h5.6" />
-          </svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.2" y="10.8" width="15.6" height="8.6" rx="1.8" /><path d="M4.6 9.3 18 4.4M9.2 15.1h5.6" /></svg>
         </button>
-        <button type="button" class="tool" id="pause" aria-label="자동 재생 멈춤" aria-pressed="false" title="자동 재생 (space)">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <g class="bars"><rect x="6.2" y="5" width="4.1" height="14" rx="1.1" /><rect x="13.7" y="5" width="4.1" height="14" rx="1.1" /></g>
-            <path class="play" d="M8 5.1v13.8a.7.7 0 0 0 1.07.6l10.6-6.9a.7.7 0 0 0 0-1.2L9.07 4.5A.7.7 0 0 0 8 5.1z" />
-          </svg>
+        <button type="button" class="tool" id="flip" aria-label="뒷면 보기" aria-pressed="false" title="뒤집기 (F)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5a8 8 0 0 1 14-4.7l2 2.2M20 4.6V9h-4.4M20 12.5a8 8 0 0 1-14 4.7l-2-2.2M4 19.4V15h4.4" /></svg>
+        </button>
+        <span class="rule" aria-hidden="true"></span>
+        <button type="button" class="tool" id="link" aria-label="이 디스크의 링크 복사" title="링크 복사">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14.2a4 4 0 0 0 5.7 0l3-3A4 4 0 0 0 13 5.5l-1 1M14 9.8a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.5l1-1" /></svg>
+        </button>
+        <button type="button" class="tool" id="save" aria-label="지금 화면을 PNG로 저장" title="PNG로 저장">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.4 10.6 12 15.2l4.6-4.6M5 19.5h14" /></svg>
         </button>
       </nav>
+
+      <aside class="editor" id="editor" aria-label="앨범 꾸미기" hidden>
+        <header>
+          <h2>앨범 꾸미기</h2>
+          <button type="button" id="closeEditor" aria-label="닫기">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </header>
+        <p class="lede">비워 두면 시드가 지어 준 그대로예요. 이 창을 연 채로 ‘다른 디스크’를 누르면 내용은 두고 디자인만 바뀝니다.</p>
+        <label>
+          <span>제목</span>
+          <input type="text" id="fTitle" maxlength="60" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          <span>아티스트</span>
+          <input type="text" id="fArtist" maxlength="40" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          <span>수록곡 <small>한 줄에 한 곡 · 끝에 3:20처럼 길이를 적어도 돼요</small></span>
+          <textarea id="fTracks" rows="6" spellcheck="false"></textarea>
+        </label>
+        <fieldset>
+          <legend>디스크</legend>
+          <div class="chips" id="kinds"></div>
+        </fieldset>
+        <fieldset>
+          <legend>커버 이미지</legend>
+          <div class="row">
+            <button type="button" class="plain" id="pick">이미지 고르기</button>
+            <button type="button" class="plain" id="unpick" hidden>이미지 빼기</button>
+          </div>
+          <input type="file" id="file" accept="image/*" hidden />
+          <small>창에 끌어다 놓아도 돼요. 이미지는 이 브라우저 밖으로 나가지 않고, 링크에도 담기지 않아요.</small>
+        </fieldset>
+        <button type="button" class="plain wide" id="reset">전부 시드대로 되돌리기</button>
+      </aside>
+
+      <div class="drop" id="drop" hidden><p>여기 놓으면 커버가 돼요</p></div>
+      <p class="toast" id="toast" role="status"></p>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

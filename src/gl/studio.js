@@ -120,6 +120,11 @@ export const STUDIO = /* glsl */ `
     .map(([k, d]) => `const vec3 L_${k} = ${v3(d)};`)
     .join('\n  ')}
 
+  // matte ink (or paper) under the softboxes
+  vec3 lambert(vec3 N) {
+    return vec3(0.44 + 0.58 * max(dot(N, L_KEY), 0.0) + 0.26 * max(dot(N, L_SIDE), 0.0) + 0.14 * max(dot(N, L_TOP), 0.0));
+  }
+
   // Unpolarised Fresnel reflectance; eta = (index on the ray's side) / (index beyond), ci = cosine of
   // incidence. Gives 1 past the critical angle.
   float fresnel(float ci, float eta) {

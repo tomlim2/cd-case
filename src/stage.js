@@ -1,36 +1,36 @@
-// The stage: one WebGL canvas, the cases on it, and the loop that moves and draws them.
+// The stage: one WebGL canvas, the case (or, between albums, two of them) and the loop that moves
+// and draws them.
 //
 // A frame is drawn in layers, back to front:
-//   1. the page with its shadows, and the discs                        -> `whole`
+//   1. the page with its shadows, and everything opaque: disc, booklet, card      -> `whole`
 //   2. each clear layer (a tray, a lid) over a copy of the picture so far, so that its rods can
-//      bend what is behind them                                          -> `patch`, ping-ponged
+//      bend what is behind them                                                    -> `patch`, ping-ponged
 //   3. glints picked out of the picture and drawn into stars, then everything goes to the screen
 import * as THREE from 'three';
 import { QUAD_VERT } from './gl/studio.js';
 import { ROD_VERT, ROD_FRAG, SHEET_VERT, SHEET_FRAG } from './gl/plastic.js';
 import { DISC_VERT, DISC_FRAG, KIND } from './gl/disc.js';
-import { PAGE_VERT, PAGE_FRAG, CASTERS } from './gl/page.js';
+import { PAPER_VERT, PAPER_FRAG } from './gl/paper.js';
+import { PAGE_VERT, PAGE_FRAG, CASES, CASTERS } from './gl/page.js';
 import { COPY_FRAG, SEED_FRAG, STREAK_FRAG, FINAL_FRAG } from './gl/post.js';
-import { HALF, HINGE, LEVEL, buildTray, buildLid, buildDisc } from './case.js';
+import { HALF, HINGE, LEVEL, BOOKLET, CARD, buildTray, buildLid, buildDisc, buildBooklet, buildCard } from './case.js';
 import { clamp01, lerp, blank, resting, lidPose, leaving, arriving, OPENING, CLOSING, SWAP_TIME } from './motion.js';
 
 const FOV = 28;
+const TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
 const PAGE_Z = -64; // the page hangs this far behind the case, so shadows fall wide and soft
 const LIGHT = new THREE.Vector3(-0.34, 0.46, 1).normalize(); // from a point on the page toward the lamp
-const SPIN = (18 * Math.PI) / 180; // the disc's speed, radians a second
+const SPIN = (16 * Math.PI) / 180; // the disc turns in its tray, radians a second
 const IOR = 1.59; // polystyrene
 const SOAK = [0.0046, 0.0033, 0.0027]; // what a millimetre of it absorbs: a faint cool grey
-const DOCK_LIFT = 42; // css pixels the view is raised by, to clear the dock
+const SORT = { tray: -1, lid: 4 }; // a height in each clear layer, to order them by distance
+const FACES = ['cover', 'liner', 'inside', 'back', 'disc'];
 
-// when nobody touches it the stage plays itself: open, close, next
-const AUTO = { open: 2.4, hold: 1.2, next: 8.6 };
-
-export function createStage(host, discs, hooks = {}) {
+export function createStage(host, hooks = {}) {
   const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.35 : 1;
   const canvas = document.createElement('canvas');
   canvas.className = 'stage-canvas';
   canvas.setAttribute('role', 'img');
-  canvas.setAttribute('aria-label', '디스크가 든 투명 주얼 케이스. 누르면 뚜껑이 열리고, 끌면 돌아갑니다.');
   host.appendChild(canvas);
 
   let renderer;
@@ -38,16 +38,19 @@ export function createStage(host, discs, hooks = {}) {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
   } catch {
     canvas.remove();
-    hooks.onFail?.();
     return null;
   }
+  const gl = renderer.getContext();
   if (!renderer.extensions.has('EXT_color_buffer_float') && !renderer.extensions.has('EXT_color_buffer_half_float')) {
     renderer.dispose();
     canvas.remove();
-    hooks.onFail?.();
     return null;
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // without a GPU (a headless capture, say) every pixel is expensive: draw fewer of them
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const software = /swiftshader|llvmpipe|software/i.test(info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : '');
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  renderer.setPixelRatio(software ? 1 : Math.min(window.devicePixelRatio || 1, 2));
   renderer.autoClear = false;
   renderer.setClearColor(0xffffff, 0);
 
@@ -73,13 +76,14 @@ export function createStage(host, discs, hooks = {}) {
     return { scene, material, u: material.uniforms };
   };
 
-  /* ---------------------------------------------------------------- the page and the discs */
+  /* ---------------------------------------------------------------- the page and what is opaque */
   const pageScene = new THREE.Scene();
   const cast = {
     uCast: { value: Array.from({ length: CASTERS }, () => new THREE.Matrix3()) },
     uShow: { value: new Array(CASTERS).fill(0) },
     uSize: { value: new Array(CASTERS).fill(1) },
-    uDisc: { value: [0, 0] },
+    // even casters are trays (with the card), odd ones lids (with the booklet)
+    uPaper: { value: Array.from({ length: CASTERS }, (_, i) => (i % 2 ? new THREE.Vector2(BOOKLET.half, BOOKLET.corner) : new THREE.Vector2(CARD.half, CARD.corner))) },
   };
   const page = new THREE.Mesh(keep(new THREE.PlaneGeometry(8000, 8000)), keep(new THREE.ShaderMaterial({ uniforms: cast, vertexShader: PAGE_VERT, fragmentShader: PAGE_FRAG })));
   page.position.z = PAGE_Z;
@@ -105,7 +109,7 @@ export function createStage(host, discs, hooks = {}) {
         uIor: { value: IOR },
         uSoak: { value: new THREE.Vector3(...SOAK) },
         uFade: { value: 1 },
-        uTaps: { value: window.matchMedia('(pointer: coarse)').matches ? 2 : 4 }, // rays per pixel, in pairs
+        uTaps: { value: coarse || software ? 2 : 4 }, // rays per pixel, in pairs
       },
       vertexShader: ROD_VERT,
       fragmentShader: ROD_FRAG,
@@ -127,60 +131,53 @@ export function createStage(host, discs, hooks = {}) {
       blendDstAlpha: THREE.OneFactor,
     })
   );
+  // drawn into depth only: whatever is opaque has to hide the plastic behind it
   const hideMat = keep(new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }));
 
-  const shapes = {};
-  const shape = (key, make) => {
-    if (!shapes[key]) {
-      const made = make();
-      for (const g of made.isBufferGeometry ? [made] : Object.values(made)) keep(g);
-      shapes[key] = made;
-    }
-    return shapes[key];
-  };
-  const part = (mesh, scene) => {
+  const part = (mesh, scene, order = 0) => {
     mesh.matrixAutoUpdate = false;
     mesh.frustumCulled = false;
     mesh.visible = false;
+    mesh.renderOrder = order;
     scene.add(mesh);
     return mesh;
   };
-
+  const geo = {
+    tray: { cd: buildTray({ clearHub: true }), plain: buildTray({ clearHub: false }) },
+    lid: buildLid(),
+    disc: { cd: keep(buildDisc({ clearHub: true })), plain: keep(buildDisc({ clearHub: false })) },
+    booklet: keep(buildBooklet()),
+    card: keep(buildCard()),
+  };
+  for (const g of [geo.tray.cd, geo.tray.plain, geo.lid]) {
+    keep(g.rods);
+    keep(g.sheets);
+  }
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
-  const cases = discs.map((data, i) => {
-    const clearHub = data.kind === 'print' || data.kind === 'holo';
-    const tray = shape(clearHub ? 'tray-cd' : 'tray', () => buildTray({ clearHub }));
-    const lid = shape('lid', buildLid);
-    const discGeo = shape(clearHub ? 'disc-cd' : 'disc', () => buildDisc({ clearHub }));
-    const art = keep(new THREE.CanvasTexture(data.art));
-    art.colorSpace = data.relief ? THREE.NoColorSpace : THREE.SRGBColorSpace;
-    art.anisotropy = maxAniso;
-    renderer.initTexture(art); // uploaded now, so the first change of disc does not stall
-    const discMat = keep(
-      new THREE.ShaderMaterial({
-        uniforms: { uArt: { value: art }, uKind: { value: KIND[data.kind] }, uInner: { value: data.inner }, uOuter: { value: data.outer }, uFade: { value: 1 } },
-        vertexShader: DISC_VERT,
-        fragmentShader: DISC_FRAG,
-        side: THREE.DoubleSide,
-      })
-    );
-    const sheets = (g) => {
-      const m = new THREE.Mesh(g, sheetMat);
-      m.renderOrder = 1;
-      return m;
+
+  // A slot is one case on stage. There are two, so that one album can leave while the next arrives.
+  const slots = Array.from({ length: CASES }, (_, i) => {
+    const paperMat = () => keep(new THREE.ShaderMaterial({ uniforms: { uFront: { value: null }, uBack: { value: null }, uFade: { value: 1 } }, vertexShader: PAPER_VERT, fragmentShader: PAPER_FRAG, side: THREE.DoubleSide }));
+    const mats = {
+      disc: keep(new THREE.ShaderMaterial({ uniforms: { uArt: { value: null }, uKind: { value: 0 }, uInner: { value: 20 }, uOuter: { value: 58 }, uFade: { value: 1 } }, vertexShader: DISC_VERT, fragmentShader: DISC_FRAG, side: THREE.DoubleSide })),
+      booklet: paperMat(),
+      card: paperMat(),
     };
-    const hidden = new THREE.Mesh(discGeo, hideMat);
-    hidden.renderOrder = -5;
-    return {
-      data,
-      seed: 1.7 * i + 0.4,
-      trayRods: part(new THREE.Mesh(tray.rods, rodMat), plasticScene),
-      traySheets: part(sheets(tray.sheets), plasticScene),
-      lidRods: part(new THREE.Mesh(lid.rods, rodMat), plasticScene),
-      lidSheets: part(sheets(lid.sheets), plasticScene),
-      disc: part(new THREE.Mesh(discGeo, discMat), pageScene),
-      discHide: part(hidden, plasticScene),
-      discMat,
+    const s = {
+      album: null,
+      tex: null,
+      mats,
+      variant: 'cd',
+      seed: 1.7 * i + 0.4, // sets this slot's sway apart from the other's
+      tray: {},
+      disc: {},
+      discHide: {},
+      lidRods: part(new THREE.Mesh(geo.lid.rods, rodMat), plasticScene),
+      lidSheets: part(new THREE.Mesh(geo.lid.sheets, sheetMat), plasticScene, 1),
+      booklet: part(new THREE.Mesh(geo.booklet, mats.booklet), pageScene),
+      card: part(new THREE.Mesh(geo.card, mats.card), pageScene),
+      bookletHide: part(new THREE.Mesh(geo.booklet, hideMat), plasticScene, -5),
+      cardHide: part(new THREE.Mesh(geo.card, hideMat), plasticScene, -5),
       mCase: new THREE.Matrix4(),
       mLid: new THREE.Matrix4(),
       iCase: new THREE.Matrix4(),
@@ -191,8 +188,44 @@ export function createStage(host, discs, hooks = {}) {
       zTray: 0,
       zLid: 0,
     };
+    for (const v of ['cd', 'plain']) {
+      s.tray[v] = { rods: part(new THREE.Mesh(geo.tray[v].rods, rodMat), plasticScene), sheets: part(new THREE.Mesh(geo.tray[v].sheets, sheetMat), plasticScene, 1) };
+      s.disc[v] = part(new THREE.Mesh(geo.disc[v], mats.disc), pageScene);
+      s.discHide[v] = part(new THREE.Mesh(geo.disc[v], hideMat), plasticScene, -5);
+    }
+    return s;
   });
-  const partsOf = (c) => [c.trayRods, c.traySheets, c.lidRods, c.lidSheets, c.disc, c.discHide];
+  const everyPart = (s) => [s.tray.cd.rods, s.tray.cd.sheets, s.tray.plain.rods, s.tray.plain.sheets, s.lidRods, s.lidSheets, s.disc.cd, s.disc.plain, s.discHide.cd, s.discHide.plain, s.booklet, s.card, s.bookletHide, s.cardHide];
+
+  // print an album into a slot
+  function load(s, album) {
+    if (!s.tex) {
+      s.tex = {};
+      for (const f of FACES) {
+        const t = keep(new THREE.CanvasTexture(album.faces[f]));
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = maxAniso;
+        s.tex[f] = t;
+      }
+      s.mats.booklet.uniforms.uFront.value = s.tex.cover;
+      s.mats.booklet.uniforms.uBack.value = s.tex.liner;
+      s.mats.card.uniforms.uFront.value = s.tex.inside;
+      s.mats.card.uniforms.uBack.value = s.tex.back;
+      s.mats.disc.uniforms.uArt.value = s.tex.disc;
+    }
+    for (const f of FACES) {
+      // every album's faces are the same size, so the texture is refilled rather than remade
+      s.tex[f].image = album.faces[f];
+      s.tex[f].needsUpdate = true;
+      renderer.initTexture(s.tex[f]); // uploaded now rather than in the middle of a move
+    }
+    const u = s.mats.disc.uniforms;
+    u.uKind.value = KIND[album.kind];
+    u.uInner.value = album.spec.inner;
+    u.uOuter.value = album.spec.outer;
+    s.variant = album.spec.clearHub ? 'cd' : 'plain';
+    s.album = album;
+  }
 
   /* ---------------------------------------------------------------- post */
   const frameU = { uWhole: { value: whole.texture }, uPatch: { value: whole.texture }, uRect: { value: rect } };
@@ -203,24 +236,25 @@ export function createStage(host, discs, hooks = {}) {
   /* ---------------------------------------------------------------- state */
   const st = {
     t: 0,
-    cur: 0,
+    cur: 0, // the slot on stage
     swap: null, // { from, to, start, dir, lid: { phase, at } }
-    queued: null,
+    queued: null, // an album asked for while two were already moving
     swaps: 0,
     phase: 'rest', // rest | opening | open | closing
     phaseAt: 0,
-    auto: false,
     closeNext: false,
-    idle: 0,
     spin: 0,
-    spinRate: SPIN,
     open: false,
   };
-  const flags = { spin: true, paused: false, ready: false, frozen: null, noGlint: false, noLid: false, noTray: false };
+  const flags = { ready: false, frozen: false, noGlint: false, noLid: false, noTray: false };
   const pointer = { x: 0, y: 0, over: false };
   const lean = { x: 0, y: 0 }; // the case leaning toward the pointer
-  const drag = { on: false, x: 0, y: 0, vx: 0, vy: 0, start: null, last: null, moved: 0, at: 0, flick: { x: 0, y: 0 } };
-  let view = { w: 1, h: 1, openSize: 1 };
+  // Turning it by hand. Yaw is free and comes to rest on whichever face is nearer, front or back;
+  // pitch only gives a little and springs back.
+  const turn = { yaw: 0, vyaw: 0, pitch: 0, vpitch: 0, target: 0 };
+  const drag = { on: false, start: null, last: null, moved: 0, at: 0 };
+  const inset = { now: { top: 0, right: 0, bottom: 0, left: 0 }, want: { top: 0, right: 0, bottom: 0, left: 0 } };
+  const view = { w: 1, h: 1, openSize: 1, reach: 400 };
   let raf = 0;
   let before = 0;
 
@@ -230,18 +264,23 @@ export function createStage(host, discs, hooks = {}) {
       hooks.onOpen?.(v);
     }
   };
-  function open(auto) {
+  const isBack = () => Math.round(turn.target / Math.PI) % 2 !== 0;
+  function aim(target) {
+    const was = isBack();
+    turn.target = target;
+    if (isBack() !== was) hooks.onFace?.(isBack());
+  }
+  const faceFront = () => aim(Math.round(turn.target / (Math.PI * 2)) * Math.PI * 2);
+  function open() {
     if (st.phase !== 'rest') return;
     st.phase = 'opening';
     st.phaseAt = st.t;
-    st.auto = auto;
+    faceFront();
     setOpen(true);
   }
   function close() {
-    if (st.phase === 'opening') {
-      st.closeNext = true; // let it finish opening first
-      st.auto = true;
-    } else if (st.phase === 'open') {
+    if (st.phase === 'opening') st.closeNext = true; // let it finish opening first
+    else if (st.phase === 'open') {
       st.phase = 'closing';
       st.phaseAt = st.t;
       setOpen(false);
@@ -249,27 +288,37 @@ export function createStage(host, discs, hooks = {}) {
   }
   function toggle(want = st.phase === 'rest' || st.phase === 'closing') {
     if (!flags.ready || st.swap) return;
-    if (want) open(false);
+    if (want) open();
     else close();
   }
-  function goTo(i) {
-    if (!flags.ready || i < 0 || i >= cases.length) return;
-    if (st.swap) {
-      st.queued = i;
+  function flip() {
+    if (flags.ready) aim(turn.target + Math.PI);
+  }
+
+  // a different album: the one on stage is pushed aside and this one comes in after it
+  function show(album, { instant = false } = {}) {
+    const here = slots[st.cur];
+    if (instant || !here.album) {
+      load(here, album);
       return;
     }
-    if (i === st.cur) return;
+    if (st.swap) {
+      st.queued = album;
+      return;
+    }
+    const to = 1 - st.cur;
+    load(slots[to], album);
     // the outgoing case keeps doing whatever its lid was doing
-    st.swap = { from: st.cur, to: i, start: st.t, dir: Math.floor(st.swaps / 2) % 2 ? -1 : 1, lid: { phase: st.phase, at: st.phaseAt } };
+    st.swap = { from: st.cur, to, start: st.t, dir: st.swaps % 2 ? -1 : 1, lid: { phase: st.phase, at: st.phaseAt } };
     st.swaps++;
     st.phase = 'rest';
     st.phaseAt = st.t;
-    st.auto = false;
     st.closeNext = false;
+    faceFront();
     setOpen(false);
-    hooks.onIndex?.(i);
   }
-  const step = (by) => goTo(((st.swap ? st.swap.to : st.cur) + by + cases.length) % cases.length);
+  // the same album, printed again (its words or its disc changed): in place, no ceremony
+  const refresh = (album) => load(slots[st.swap ? st.swap.to : st.cur], album);
 
   /* ---------------------------------------------------------------- placing a case */
   const euler = new THREE.Euler(0, 0, 0, 'XYZ');
@@ -297,59 +346,57 @@ export function createStage(host, discs, hooks = {}) {
     return out.set(ex[0] - o[0], ey[0] - o[0], o[0], ex[1] - o[1], ey[1] - o[1], o[1], ex[2] - o[2], ey[2] - o[2], o[2]);
   }
 
-  function place(c, pose, slot) {
+  function place(s, pose, index) {
     const size = pose.size * lerp(1, view.openSize, pose.spread);
-    euler.set(pose.pitch + lean.x + drag.x, pose.yaw + lean.y + drag.y, pose.roll);
+    euler.set(pose.pitch + lean.x + turn.pitch, pose.yaw + lean.y + turn.yaw, pose.roll);
     quat.setFromEuler(euler);
     // open, the pair is centred: the tray moves right to make room for the lid
     v.set(pose.x + HALF * size * pose.spread * 0.94, pose.y, pose.z);
-    c.mCase.compose(v, quat, s3.setScalar(size));
+    s.mCase.compose(v, quat, s3.setScalar(size));
     m1.makeTranslation(HINGE.x, 0, HINGE.z);
     m2.makeRotationY(-pose.lid);
-    c.mLid.copy(c.mCase).multiply(m1).multiply(m2).multiply(m1.makeTranslation(-HINGE.x, 0, -HINGE.z));
-    c.iCase.copy(c.mCase).invert();
-    c.iLid.copy(c.mLid).invert();
-    m2.makeRotationZ(-st.spin);
-    c.disc.matrix.copy(c.mCase).multiply(m2);
-    c.discHide.matrix.copy(c.disc.matrix);
-    c.trayRods.matrix.copy(c.mCase);
-    c.traySheets.matrix.copy(c.mCase);
-    c.lidRods.matrix.copy(c.mLid);
-    c.lidSheets.matrix.copy(c.mLid);
-    for (const p of partsOf(c)) {
+    s.mLid.copy(s.mCase).multiply(m1).multiply(m2).multiply(m1.makeTranslation(-HINGE.x, 0, -HINGE.z));
+    s.iCase.copy(s.mCase).invert();
+    s.iLid.copy(s.mLid).invert();
+    for (const p of everyPart(s)) p.visible = false;
+    const k = s.variant;
+    const tray = [s.tray[k].rods, s.tray[k].sheets, s.card, s.cardHide];
+    const lid = [s.lidRods, s.lidSheets, s.booklet, s.bookletHide];
+    const disc = [s.disc[k], s.discHide[k]];
+    m2.copy(s.mCase).multiply(m1.makeRotationZ(-st.spin));
+    for (const p of tray) p.matrix.copy(s.mCase);
+    for (const p of lid) p.matrix.copy(s.mLid);
+    for (const p of disc) p.matrix.copy(m2);
+    for (const p of [...tray, ...lid, ...disc]) {
       p.matrixWorld.copy(p.matrix);
       p.visible = true;
     }
-    c.discMat.uniforms.uFade.value = pose.fade;
-    c.fade = pose.fade;
-    c.size = size;
-    c.zTray = v.set(0, 0, LEVEL.tray).applyMatrix4(c.mCase).applyMatrix4(camera.matrixWorldInverse).z;
-    c.zLid = v.set(0, 0, LEVEL.lid).applyMatrix4(c.mLid).applyMatrix4(camera.matrixWorldInverse).z;
-    c.shown = true;
+    for (const m of Object.values(s.mats)) m.uniforms.uFade.value = pose.fade;
+    s.fade = pose.fade;
+    s.size = size;
+    s.zTray = v.set(0, 0, SORT.tray).applyMatrix4(s.mCase).applyMatrix4(camera.matrixWorldInverse).z;
+    s.zLid = v.set(0, 0, SORT.lid).applyMatrix4(s.mLid).applyMatrix4(camera.matrixWorldInverse).z;
+    s.shown = true;
     // shadows
-    const k = slot * 3;
-    m1.copy(c.disc.matrix).invert();
-    castInto(cast.uCast.value[k], c.iCase, LEVEL.tray);
-    castInto(cast.uCast.value[k + 1], m1, LEVEL.disc);
-    castInto(cast.uCast.value[k + 2], c.iLid, LEVEL.lid);
-    for (let j = 0; j < 3; j++) {
-      cast.uShow.value[k + j] = pose.fade;
-      cast.uSize.value[k + j] = size;
+    castInto(cast.uCast.value[index * 2], s.iCase, LEVEL.tray);
+    castInto(cast.uCast.value[index * 2 + 1], s.iLid, LEVEL.lid);
+    for (let j = 0; j < 2; j++) {
+      cast.uShow.value[index * 2 + j] = pose.fade;
+      cast.uSize.value[index * 2 + j] = size;
     }
-    cast.uDisc.value[slot] = c.data.shadow;
   }
-  function hide(c) {
-    for (const p of partsOf(c)) p.visible = false;
-    c.shown = false;
+  function hide(s) {
+    for (const p of everyPart(s)) p.visible = false;
+    s.shown = false;
   }
 
-  // is the pointer (in clip coordinates) over the current case?
+  // is the pointer (in clip coordinates) over the case on stage?
   const ro = new THREE.Vector3();
   const rd = new THREE.Vector3();
   function over(x, y) {
-    const c = cases[st.cur];
-    if (!c?.shown) return false;
-    for (const [inv, level] of [[c.iCase, 0], [c.iLid, LEVEL.lid]]) {
+    const s = slots[st.cur];
+    if (!s.shown) return false;
+    for (const [inv, level] of [[s.iCase, 0], [s.iLid, HINGE.z]]) {
       ro.copy(camera.position).applyMatrix4(inv);
       rd.set(x, y, 0.5).unproject(camera).applyMatrix4(inv).sub(ro);
       if (Math.abs(rd.z) < 1e-6) continue;
@@ -363,28 +410,37 @@ export function createStage(host, discs, hooks = {}) {
   function tick(dt) {
     st.t += dt;
     const t = st.t;
-    st.spinRate += ((flags.spin ? SPIN : 0) - st.spinRate) * (1 - Math.exp(-2.7 * dt));
-    st.spin += st.spinRate * dt;
+    st.spin += SPIN * dt;
 
-    // the case leans a little toward the pointer; a drag turns it, and letting go springs it back
+    // the room the page leaves round the stage can change (a panel opening); follow it smoothly
+    let moved = false;
+    for (const k of ['top', 'right', 'bottom', 'left']) {
+      const d = inset.want[k] - inset.now[k];
+      if (d === 0) continue;
+      inset.now[k] = Math.abs(d) > 0.5 ? inset.now[k] + d * (1 - Math.exp(-9 * dt)) : inset.want[k];
+      moved = true;
+    }
+    if (moved) frame();
+
+    // the case leans a little toward the pointer
     const hovering = pointer.over && !drag.on;
     const ease = 1 - Math.exp(-4 * dt);
-    lean.x += ((hovering ? 0.2 * pointer.y : 0) - lean.x) * ease;
-    lean.y += ((hovering ? -0.32 * pointer.x : 0) - lean.y) * ease;
+    lean.x += ((hovering ? 0.16 * pointer.y : 0) - lean.x) * ease;
+    lean.y += ((hovering ? -0.26 * pointer.x : 0) - lean.y) * ease;
+    // let go, it swings to the nearer face and its tilt springs back
     if (!drag.on) {
-      drag.vx += (-18 * drag.x - 6 * drag.vx) * dt;
-      drag.vy += (-18 * drag.y - 6 * drag.vy) * dt;
-      drag.x += drag.vx * dt;
-      drag.y += drag.vy * dt;
+      turn.vyaw += (-22 * (turn.yaw - turn.target) - 7.5 * turn.vyaw) * dt;
+      turn.yaw += turn.vyaw * dt;
+      turn.vpitch += (-22 * turn.pitch - 7.5 * turn.vpitch) * dt;
+      turn.pitch += turn.vpitch * dt;
     }
 
     if (st.swap && t - st.swap.start >= SWAP_TIME) {
       st.cur = st.swap.to;
       st.swap = null;
-      st.idle = 0;
       const q = st.queued;
       st.queued = null;
-      if (q !== null && q !== st.cur) goTo(q);
+      if (q) show(q);
     }
     const into = t - st.phaseAt;
     if (st.phase === 'opening' && into >= OPENING.time) {
@@ -393,34 +449,23 @@ export function createStage(host, discs, hooks = {}) {
     } else if (st.phase === 'closing' && into >= CLOSING.time) {
       st.phase = 'rest';
       st.phaseAt = t;
-      st.idle = Math.max(st.idle, AUTO.next - 1.8);
     }
-
-    // playing itself, unless someone is at it
-    const held = drag.on || (hovering && over(pointer.x, pointer.y)) || (st.phase === 'open' && !st.auto);
-    const playing = flags.ready && !flags.paused && !held && !st.swap;
-    if (st.phase === 'open' && (st.closeNext || (st.auto && playing && t - st.phaseAt >= AUTO.hold))) {
+    if (st.phase === 'open' && st.closeNext) {
       st.closeNext = false;
       close();
     }
-    if (playing) {
-      st.idle += dt;
-      if (st.phase === 'rest' && st.idle >= AUTO.open && st.idle < AUTO.open + 0.5) open(true);
-      if (st.phase === 'rest' && st.idle >= AUTO.next) step(1);
-    }
-    hooks.onProgress?.(st.swap ? 0 : clamp01(st.idle / AUTO.next));
 
     // who is on stage, and where
     const sw = st.swap;
     const along = sw ? clamp01((t - sw.start) / SWAP_TIME) : 0;
-    let slot = 0;
-    cases.forEach((c, i) => {
-      if (sw && i === sw.from) place(c, leaving(lidPose(sw.lid.phase, t - sw.lid.at, t, c.seed, calm), along, sw.dir), slot++);
-      else if (sw && i === sw.to) place(c, arriving(resting(t, c.seed, calm), along, sw.dir), slot++);
-      else if (!sw && i === st.cur) place(c, lidPose(st.phase, t - st.phaseAt, t, c.seed, calm), slot++);
-      else hide(c);
+    let index = 0;
+    slots.forEach((s, i) => {
+      if (sw && i === sw.from) place(s, leaving(lidPose(sw.lid.phase, t - sw.lid.at, t, s.seed, calm), along, sw.dir, view.reach), index++);
+      else if (sw && i === sw.to) place(s, arriving(resting(t, s.seed, calm), along, sw.dir, view.reach), index++);
+      else if (!sw && i === st.cur && s.album) place(s, lidPose(st.phase, t - st.phaseAt, t, s.seed, calm), index++);
+      else hide(s);
     });
-    for (; slot < 2; slot++) for (let j = 0; j < 3; j++) cast.uShow.value[slot * 3 + j] = 0;
+    for (; index < CASES; index++) for (let j = 0; j < 2; j++) cast.uShow.value[index * 2 + j] = 0;
     draw();
   }
 
@@ -428,9 +473,9 @@ export function createStage(host, discs, hooks = {}) {
   const corner = new THREE.Vector3();
   function cover(w, h) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const c of cases) {
-      if (!c.shown) continue;
-      for (const m of [c.mCase, c.mLid]) {
+    for (const s of slots) {
+      if (!s.shown) continue;
+      for (const m of [s.mCase, s.mLid]) {
         for (let i = 0; i < 8; i++) {
           corner.set(i & 1 ? 76 : -76, i & 2 ? 76 : -76, i & 4 ? 7 : -7).applyMatrix4(m).project(camera);
           x0 = Math.min(x0, corner.x);
@@ -448,18 +493,19 @@ export function createStage(host, discs, hooks = {}) {
   }
 
   const layers = [];
+  const clear = slots.flatMap((s) => [s.tray.cd.rods, s.tray.cd.sheets, s.tray.plain.rods, s.tray.plain.sheets, s.lidRods, s.lidSheets]);
   function draw() {
-    // 1. page, shadows, discs
+    // 1. page, shadows, and everything opaque
     renderer.setRenderTarget(whole);
     renderer.clear();
     renderer.render(pageScene, camera);
 
     // 2. the clear layers, furthest first
     layers.length = 0;
-    for (const c of cases) {
-      if (!c.shown) continue;
-      if (!flags.noTray) layers.push({ z: c.zTray, rods: c.trayRods, sheets: c.traySheets, fade: c.fade, size: c.size });
-      if (!flags.noLid) layers.push({ z: c.zLid, rods: c.lidRods, sheets: c.lidSheets, fade: c.fade, size: c.size });
+    for (const s of slots) {
+      if (!s.shown) continue;
+      if (!flags.noTray) layers.push({ z: s.zTray, rods: s.tray[s.variant].rods, sheets: s.tray[s.variant].sheets, fade: s.fade, size: s.size });
+      if (!flags.noLid) layers.push({ z: s.zLid, rods: s.lidRods, sheets: s.lidSheets, fade: s.fade, size: s.size });
     }
     layers.sort((a, b) => a.z - b.z);
     const w = whole.width;
@@ -468,7 +514,6 @@ export function createStage(host, discs, hooks = {}) {
     let picture = whole;
     if (box) {
       rect.set(box.x / w, box.y / h, box.x1 / w, box.y1 / h);
-      const clear = cases.flatMap((c) => [c.trayRods, c.traySheets, c.lidRods, c.lidSheets]);
       const was = clear.map((m) => m.visible);
       for (const p of patch) {
         p.scissor.set(box.x, box.y, box.x1 - box.x, box.y1 - box.y);
@@ -511,27 +556,38 @@ export function createStage(host, discs, hooks = {}) {
   }
 
   /* ---------------------------------------------------------------- size */
+  // Put the camera where the closed case fills the part of the window that is free (the page keeps
+  // some of it for its controls), and shift the view so that part's middle is the stage's middle.
+  function frame() {
+    const { w, h } = view;
+    const i = inset.now;
+    const freeW = Math.max(160, w - i.left - i.right);
+    const freeH = Math.max(160, h - i.top - i.bottom);
+    // the closed case takes 62% of the free height, or on a narrow screen 80% of the free width
+    const dist = (146 * h) / (2 * TAN * Math.min(0.62 * freeH, 0.8 * freeW));
+    camera.aspect = w / h;
+    camera.position.set(0, 0, dist);
+    camera.lookAt(0, 0, 0);
+    camera.setViewOffset(w, h, (i.right - i.left) / 2, (i.bottom - i.top) / 2, w, h);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const perMm = h / (2 * dist * TAN); // css pixels a millimetre covers
+    // open, lid and tray lie side by side: scaled to keep the pair inside the free width
+    view.openSize = Math.min(1.04, (0.92 * freeW) / (296 * perMm));
+    // how far to one side is off stage
+    view.reach = w / perMm / 2 + 110;
+  }
   function resize() {
-    const w = host.clientWidth || 1;
-    const h = host.clientHeight || 1;
-    renderer.setSize(w, h, false);
+    view.w = host.clientWidth || 1;
+    view.h = host.clientHeight || 1;
+    renderer.setSize(view.w, view.h, false);
     const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
     whole.setSize(buf.x, buf.y);
     for (const p of patch) p.setSize(buf.x, buf.y);
     const hw = Math.max(1, Math.round(buf.x / 2));
     const hh = Math.max(1, Math.round(buf.y / 2));
     for (const s of [seeds, streakA, streakB]) s.setSize(hw, hh);
-    camera.aspect = w / h;
-    const tan = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-    // the closed case takes 58% of the height, or on a narrow screen 78% of the width
-    const dist = Math.max(146 / 0.58 / 2 / tan, 146 / 0.78 / 2 / (tan * camera.aspect));
-    camera.position.set(0, 0, dist);
-    camera.lookAt(0, 0, 0);
-    camera.setViewOffset(w, h, 0, DOCK_LIFT, w, h);
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld();
-    // open, lid and tray lie side by side: scaled to keep the pair inside the width
-    view = { w, h, openSize: Math.min(1.04, (0.9 * 2 * dist * tan * camera.aspect) / 296) };
+    frame();
   }
   const watcher = new ResizeObserver(resize);
   watcher.observe(host);
@@ -548,14 +604,18 @@ export function createStage(host, discs, hooks = {}) {
       host.style.cursor = over(pointer.x, pointer.y) ? 'pointer' : '';
       return;
     }
-    const dx = (e.clientX - drag.last.x) * 0.008;
-    const dy = (e.clientY - drag.last.y) * 0.008;
+    const now = performance.now();
+    const dx = (e.clientX - drag.last.x) * 0.009;
+    const dy = (e.clientY - drag.last.y) * 0.006;
+    const dt = Math.max(1, now - drag.at) / 1000;
     drag.last = { x: e.clientX, y: e.clientY };
     drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y));
-    drag.y = Math.min(0.9, Math.max(-0.9, drag.y + dx));
-    drag.x = Math.min(0.45, Math.max(-0.45, drag.x + dy));
-    drag.flick = { x: dy * 60, y: dx * 60 };
-    drag.at = performance.now();
+    turn.yaw += dx;
+    turn.pitch = Math.min(0.5, Math.max(-0.5, turn.pitch + dy));
+    // remember how fast it was going, for the flick
+    turn.vyaw = lerp(turn.vyaw, dx / dt, 0.5);
+    turn.vpitch = 0;
+    drag.at = now;
   };
   const onLeave = () => {
     pointer.over = false;
@@ -568,8 +628,8 @@ export function createStage(host, discs, hooks = {}) {
     drag.start = { x: e.clientX, y: e.clientY };
     drag.last = { x: e.clientX, y: e.clientY };
     drag.moved = 0;
-    drag.flick = { x: 0, y: 0 };
     drag.at = performance.now();
+    turn.vyaw = 0;
     try {
       host.setPointerCapture(e.pointerId);
     } catch {
@@ -580,11 +640,13 @@ export function createStage(host, discs, hooks = {}) {
   const onUp = (e) => {
     if (!drag.on) return;
     drag.on = false;
-    // a flick carries on; a drag that had come to rest just lets go
-    const still = performance.now() - drag.at > 90;
-    drag.vx = still ? 0 : drag.flick.x;
-    drag.vy = still ? 0 : drag.flick.y;
-    if (host.hasPointerCapture(e.pointerId)) host.releasePointerCapture(e.pointerId);
+    // a drag that had come to rest just lets go; a flick carries it on, perhaps right over
+    if (performance.now() - drag.at > 90) turn.vyaw = 0;
+    turn.vyaw = Math.max(-9, Math.min(9, turn.vyaw));
+    aim(Math.round((turn.yaw + turn.vyaw * 0.16) / Math.PI) * Math.PI);
+    // an open case stays facing you: its lid is in the way of anything else
+    if (st.phase !== 'rest') faceFront();
+    if (host.hasPointerCapture?.(e.pointerId)) host.releasePointerCapture(e.pointerId);
     host.style.cursor = '';
     if (e.type === 'pointerup' && drag.moved < 6) toggle();
   };
@@ -597,7 +659,7 @@ export function createStage(host, discs, hooks = {}) {
   /* ---------------------------------------------------------------- loop */
   // if frames are slow, give up resolution before smoothness
   const times = [];
-  let tuning = true;
+  let tuning = !software;
   function tune(dt) {
     if (!tuning || document.hidden || dt > 0.1) return;
     times.push(dt);
@@ -624,43 +686,50 @@ export function createStage(host, discs, hooks = {}) {
 
   resize();
   flags.ready = true;
-  hooks.onIndex?.(0);
-  hooks.onReady?.();
   raf = requestAnimationFrame(loop);
 
   return {
-    next: () => step(1),
-    prev: () => step(-1),
-    goTo,
+    show,
+    refresh,
     toggle,
-    setSpin: (on) => (flags.spin = on),
-    setPaused: (on) => (flags.paused = on),
+    flip,
+    // how much of the window the page keeps for itself on each side, in css pixels
+    setInsets(next, { instant = false } = {}) {
+      Object.assign(inset.want, next);
+      if (instant) {
+        Object.assign(inset.now, inset.want);
+        frame();
+      }
+    },
+    // the picture on stage right now, as a PNG
+    snapshot() {
+      draw();
+      return new Promise((done) => canvas.toBlob(done, 'image/png'));
+    },
     // for looking at one moment at a time while tuning
     debug: {
       st,
       flags,
+      turn,
       renderer,
       rodMat,
-      sheetMat,
-      cases,
-      targets: { whole, patch, seeds },
+      slots,
+      software,
       ratio(r) {
         renderer.setPixelRatio(r);
         resize();
       },
-      // draw the current case in a given pose and stop the clock
+      // draw the case on stage in a given pose and stop the clock
       pose(p) {
         flags.frozen = true;
-        cases.forEach(hide);
-        place(cases[st.cur], { ...blank(), ...p }, 0);
-        for (let j = 3; j < CASTERS; j++) cast.uShow.value[j] = 0;
+        slots.forEach(hide);
+        place(slots[st.cur], { ...blank(), ...p }, 0);
+        for (let j = 2; j < CASTERS; j++) cast.uShow.value[j] = 0;
         draw();
       },
-      // run the clock to t seconds from a fresh start on disc i, then stop
-      at(i, t, stepSize = 1 / 60) {
+      // run the clock on by t seconds, then stop it
+      run(t, stepSize = 1 / 60) {
         flags.frozen = true;
-        Object.assign(st, { t: 0, cur: i, swap: null, queued: null, idle: 0, phase: 'rest', phaseAt: 0, spin: 0, auto: false });
-        lean.x = lean.y = drag.x = drag.y = drag.vx = drag.vy = 0;
         for (let x = 0; x < t; x += stepSize) tick(Math.min(stepSize, t - x));
         if (t <= 0) tick(0);
       },

@@ -82,10 +82,6 @@ export const DISC_FRAG = /* glsl */ `
     return g;
   }
 
-  // matte ink under the softboxes
-  vec3 lambert(vec3 N) {
-    return vec3(0.44 + 0.58 * max(dot(N, L_KEY), 0.0) + 0.26 * max(dot(N, L_SIDE), 0.0) + 0.14 * max(dot(N, L_TOP), 0.0));
-  }
   // aluminium behind lacquer: the room softly mirrored, over a floor of its own
   vec3 satin(vec3 Rd, vec3 N) {
     return vec3(0.92, 0.95, 1.0) * (min(studio(Rd, 0.07).rgb, vec3(1.5)) * 0.55 + 0.36 + 0.14 * dot(N, L_KEY));
@@ -123,14 +119,15 @@ export const DISC_FRAG = /* glsl */ `
       if (uKind == 2) {
         // Gold, brushed in circles. The art is not a picture here but a relief: r is engraving cut
         // through the brushing, g the brushing itself (0.5 = even).
-        float grain = 0.55 + 0.9 * art.g;
+        vec2 relief = sqrt(art.rg);   // the texture is decoded as sRGB like the others; this undoes it, near enough
+        float grain = 0.55 + 0.9 * relief.g;
         float caught = dot(studio(Rd - gOut * 0.2, 0.2).rgb + studio(Rd + gOut * 0.2, 0.2).rgb, vec3(1.0 / 6.0));
         float lightAmt = (0.3 + 0.16 * min(caught, 4.0) + grooves(V, N, 0.46, 0.055, vec4(0.9, 0.7, 0.45, 0.1))) * grain;
         // deep amber in the dim, paling toward yellow where it catches a lamp, but never to white
         vec3 gold = mix(vec3(0.56, 0.25, 0.045), vec3(1.0, 0.8, 0.4), 1.0 - exp(-lightAmt * 1.1));
         col = gold * (1.0 - exp(-lightAmt * 1.3)) * 1.2;
         // engraving is frosted: it takes the light evenly instead of in streaks
-        col = mix(col, vec3(1.0, 0.74, 0.3) * (lambert(N) * 0.72 + 0.16), smoothstep(0.25, 0.7, art.r) * 0.85);
+        col = mix(col, vec3(1.0, 0.74, 0.3) * (lambert(N) * 0.72 + 0.16), smoothstep(0.25, 0.7, relief.r) * 0.85);
         // a black label round the spindle hole
         float label = 1.0 - smoothstep(uInner - 0.3, uInner + 0.2, r);
         col = mix(col, vec3(0.016) + studio(Rd, 0.04).rgb * 0.035, label);

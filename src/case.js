@@ -1,13 +1,16 @@
 // The jewel case as a parts list, sized by measuring stills of the reference against its 120 mm disc.
 // Millimetres. The case lies in its own XY plane, front toward +z, hinge on the left (-x).
 // Everything is either a rod (a path swept with a rounded section) or a slab (a flat clear sheet).
-import { Rods, slab, mergeSlabs, discGeometry, fillet, arc, circle, roundRect, roundSquare } from './geometry.js';
+import { Rods, slab, mergeSlabs, discGeometry, paperGeometry, fillet, arc, circle, roundRect, roundSquare } from './geometry.js';
 
 export const HALF = 73; // a 146 mm square
 export const HINGE = { x: -72, z: 4 }; // the lid turns about this line, which runs along y
 export const DISC = { outer: 60, top: -1.2, bottom: -2.4, hole: 7.5, clear: 15 };
+// the paper inside: a booklet held against the lid by its tabs, and a card under the tray
+export const BOOKLET = { half: 67.5, corner: 2, z: 3.15 }; // in the lid's frame
+export const CARD = { half: 70.5, corner: 6.5, z: -4.2 }; // in the tray's
 // the heights shadows are cast from
-export const LEVEL = { tray: -2, disc: -1.8, lid: 4 };
+export const LEVEL = { tray: CARD.z, lid: BOOKLET.z };
 
 const deg = Math.PI / 180;
 const polar = (r, a) => [r * Math.cos(a * deg), r * Math.sin(a * deg)];
@@ -58,11 +61,12 @@ export function buildTray({ clearHub }) {
     r.add(fillet([[sx * 45.5, -inner], [sx * 45.5, -50], [sx * 42, -46]], 4), tube(3.6, 3.6, 0.95, -1.9));
   }
 
-  /* the grip on the hinge side: a raised pad with a C-shaped ridge and a small window */
+  /* the grip on the hinge side: a low pad with a C-shaped ridge and a small window. It has to stay
+     under the booklet, which lies just above it when the lid is shut */
   const pad = { cx: -62, hw: 11, hh: 22 };
-  r.add(roundRect(pad.cx, 0, pad.hw - 0.8, pad.hh - 0.8, 3.5), tube(1.6, 1.6, 0.94, 1.8, { seg: 4 }), true);
-  r.add(fillet([[-69, 13.5], [-58.5, 13.5], [-58.5, -13.5], [-69, -13.5]], 3.2), tube(2.6, 2.0, 0.9, 3));
-  r.add(roundRect(-55.2, 0, 4.2, 3.0, 1.2), tube(1.3, 1.1, 0.9, 3, { seg: 3 }), true);
+  r.add(roundRect(pad.cx, 0, pad.hw - 0.8, pad.hh - 0.8, 3.5), tube(1.6, 1.6, 0.94, 1.3, { seg: 4 }), true);
+  r.add(fillet([[-69, 13.5], [-58.5, 13.5], [-58.5, -13.5], [-69, -13.5]], 3.2), tube(2.6, 1.8, 0.9, 1.9));
+  r.add(roundRect(-55.2, 0, 4.2, 3.0, 1.2), tube(1.3, 1.1, 0.9, 1.9, { seg: 3 }), true);
 
   /* the hub: stacked rings, and four posts round the spindle */
   r.add(circle(0, 0, 18.6, 0.7), tube(1.6, 1.5, 0.92, -0.5, { seg: 4 }), true);
@@ -82,7 +86,7 @@ export function buildTray({ clearHub }) {
 
   const sheets = [
     slab(roundSquare(HALF, 8), -5.2, -3.8), // the floor
-    slab(roundRect(pad.cx, 0, pad.hw, pad.hh, 4.2), 1, 2.6), // the grip's pad
+    slab(roundRect(pad.cx, 0, pad.hw, pad.hh, 4.2), 0.6, 2.0), // the grip's pad
     slab(circle(0, 0, 19.2, 0.7), -1.1, -0.2, [circle(0, 0, 6.1, 0.5), ...posts]), // the hub's plate
   ];
   if (clearHub) {
@@ -98,23 +102,23 @@ export function buildLid() {
   /* the rim, and a fine lip just inside it */
   r.add(roundSquare(72, 7), tube(2, 2, 0.98, 4, { seg: 5 }), true);
   const lip = 69.5;
-  const fine = tube(0.84, 0.8, 0.9, 3.25, { seg: 3 });
-  r.add(roundSquare(lip, 5), fine, true);
-  /* half-moon tabs for the booklet, two on each of the long edges */
+  r.add(roundSquare(lip, 5), tube(0.84, 0.8, 0.9, 3.3, { seg: 3 }), true);
+  /* Half-moon tabs, two on each of the long edges, and small catches on the other two. The booklet
+     slides in between these and the sheet, so they sit just under it. */
+  const under = BOOKLET.z - 0.45;
   for (const side of [-1, 1]) {
     for (const x of [-41, 32]) {
       const [a0, a1] = side > 0 ? [Math.PI, Math.PI * 2] : [0, Math.PI];
-      r.add(arc([x, side * lip], 4.2, a0, a1, 0.5), fine);
+      r.add(arc([x, side * lip], 4.2, a0, a1, 0.5), tube(0.84, 0.76, 0.9, under, { seg: 3 }));
     }
-  }
-  /* small catches on the other two */
-  for (const side of [-1, 1]) {
-    for (const y of [-30, 30]) r.add([[side * lip, y - 3], [side * lip, y + 3]], tube(1.0, 0.9, 0.88, 3.3, { seg: 3 }));
+    for (const y of [-30, 30]) r.add([[side * lip, y - 3], [side * lip, y + 3]], tube(1.0, 0.8, 0.88, under, { seg: 3 }));
   }
   /* hinge barrels */
   const barrel = tube(4, 4, 0.99, HINGE.z, { ends: 'flat' });
   for (const sy of [-1, 1]) r.add([[HINGE.x, sy * 20], [HINGE.x, sy * 42]], barrel);
-  return { rods: r.build(), sheets: mergeSlabs([slab(roundSquare(HALF, 8), 3, 5)]) };
+  return { rods: r.build(), sheets: mergeSlabs([slab(roundSquare(HALF, 8), 3.4, 5)]) };
 }
 
+export const buildBooklet = () => paperGeometry(BOOKLET.half, BOOKLET.corner, BOOKLET.z);
+export const buildCard = () => paperGeometry(CARD.half, CARD.corner, CARD.z);
 export const buildDisc = ({ clearHub }) => discGeometry(clearHub ? DISC.clear : DISC.hole, DISC.outer, DISC.top, DISC.bottom);

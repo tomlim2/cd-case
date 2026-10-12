@@ -1,11 +1,12 @@
 :root {
   --ink: #101014;
-  --ink-soft: rgb(16 16 20 / 0.48);
-  --hair: rgb(16 16 20 / 0.09);
+  --ink-soft: rgb(16 16 20 / 0.5);
+  --hair: rgb(16 16 20 / 0.1);
+  --glass: rgb(255 255 255 / 0.76);
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', 'Segoe UI', system-ui, sans-serif;
-  --pad: max(20px, env(safe-area-inset-bottom));
-  --thumb: 50px;
-  --tool: 42px;
+  --mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --pad: max(18px, env(safe-area-inset-bottom));
+  --panel: 320px;
 }
 
 * {
@@ -23,13 +24,29 @@ body {
   font-family: var(--font);
   color: var(--ink);
   -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  -webkit-user-select: none;
+}
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+:is(button, input, textarea):focus-visible {
+  outline: 1.5px solid var(--ink);
+  outline-offset: 2px;
 }
 
 #app {
   position: fixed;
   inset: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* the canvas fills the window; everything else floats over it */
@@ -74,17 +91,17 @@ body {
   line-height: 1.5;
   color: var(--ink-soft);
 }
-.fail[hidden] {
-  display: none;
+[hidden] {
+  display: none !important;
 }
 
-/* ---- top left: a name, and one line about how it is made ---- */
+/* ---- top left: what this is, which day's disc, and what it is called ---- */
 .corner {
   position: absolute;
   top: max(16px, env(safe-area-inset-top));
   left: max(18px, env(safe-area-inset-left));
+  max-width: min(70vw, 420px);
   transition-delay: 0.15s;
-  pointer-events: none;
 }
 .corner h1 {
   margin: 0;
@@ -93,29 +110,59 @@ body {
   letter-spacing: -0.01em;
 }
 .corner p {
-  margin: 4px 0 0;
-  font-size: 12px;
+  margin: 0;
+}
+.corner .date {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 5px 0 0 -7px;
+  font: 12px var(--mono);
   color: var(--ink-soft);
 }
-.dock button:focus-visible {
-  outline: 1.5px solid var(--ink);
-  outline-offset: 2px;
+.corner .date button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+.corner .date button:hover:not(:disabled) {
+  background: rgb(16 16 20 / 0.06);
+  color: var(--ink);
+}
+.corner .date button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.corner .now {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.corner .now b {
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .hint {
   position: absolute;
   inset-inline: 0;
-  bottom: calc(var(--pad) + 86px);
+  bottom: calc(var(--pad) + 68px);
   margin: 0;
   text-align: center;
   font-size: 11.5px;
   letter-spacing: 0.01em;
   color: rgb(16 16 20 / 0.4);
   pointer-events: none;
-  transition-delay: 0.5s;
+  transition: opacity 0.5s;
 }
 
-/* ---- bottom: the discs and three switches ---- */
+/* ---- bottom: what you can do with it ---- */
 .dock {
   position: absolute;
   left: 50%;
@@ -123,157 +170,315 @@ body {
   translate: -50% 10px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  max-width: calc(100vw - 20px);
-  padding: 6px 8px;
+  gap: 4px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
   border: 1px solid var(--hair);
-  border-radius: 22px;
-  background: rgb(255 255 255 / 0.72);
+  border-radius: 999px;
+  background: var(--glass);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  box-shadow: 0 12px 28px -14px rgb(16 16 20 / 0.22);
+  box-shadow: 0 12px 28px -14px rgb(16 16 20 / 0.25);
   transition: opacity 0.7s ease 0.2s, translate 0.9s cubic-bezier(0.2, 0.9, 0.2, 1) 0.2s;
 }
 [data-ready] .dock {
   translate: -50% 0;
 }
-.dock button {
-  flex: none;
-  border: 0;
-  padding: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.rail {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  /* room for a lifted thumbnail's shadow without the rail clipping it */
-  padding-block: 9px;
-  margin-block: -9px;
-}
-.rail::-webkit-scrollbar {
-  display: none;
-}
-.thumb {
-  position: relative;
-  width: var(--thumb);
-  height: var(--thumb);
-  border-radius: 13px;
-  transition: background-color 0.25s;
-}
-.thumb:hover {
-  background-color: rgb(16 16 20 / 0.045);
-}
-/* waiting discs sit small, grey and askew; the playing one stands up in colour */
-.thumb canvas {
-  position: absolute;
-  inset: 5px;
-  width: calc(100% - 10px);
-  height: calc(100% - 10px);
-  opacity: 0.5;
-  filter: saturate(0.3) drop-shadow(0 1px 2px rgb(16 16 20 / 0.2));
-  rotate: var(--tilt, 0deg);
-  scale: 0.82;
-  transition: opacity 0.3s, filter 0.3s, rotate 0.45s cubic-bezier(0.3, 1.5, 0.6, 1), scale 0.45s cubic-bezier(0.3, 1.5, 0.6, 1), translate 0.45s cubic-bezier(0.3, 1.5, 0.6, 1);
-}
-.thumb:hover canvas {
-  opacity: 0.88;
-  filter: saturate(0.85) drop-shadow(0 3px 5px rgb(16 16 20 / 0.24));
-  rotate: 0deg;
-  scale: 0.93;
-  translate: 0 -2px;
-}
-.thumb[data-active] canvas {
-  opacity: 1;
-  filter: drop-shadow(0 5px 9px rgb(16 16 20 / 0.3));
-  rotate: 0deg;
-  scale: 1;
-  translate: 0 -3px;
-}
-/* under the playing disc: how long until the stage moves on by itself */
-.thumb .timer {
-  position: absolute;
-  left: 30%;
-  right: 30%;
-  bottom: 1px;
-  height: 2px;
-  border-radius: 1px;
-  background: linear-gradient(90deg, var(--ink) calc(var(--p, 0) * 100%), rgb(16 16 20 / 0.12) 0);
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-.thumb[data-active] .timer {
-  opacity: 1;
-}
-
-.dock .rule {
-  align-self: stretch;
-  width: 1px;
-  margin: 9px 3px;
-  background: var(--hair);
-}
-.tool {
-  display: grid;
-  place-items: center;
-  width: var(--tool);
-  height: var(--tool);
-  border-radius: 50%;
-  transition: background-color 0.2s, color 0.2s;
-}
-.tool:hover {
-  background-color: rgb(16 16 20 / 0.06);
-}
-.tool[aria-pressed='true']:not(#pause) {
-  background-color: var(--ink);
-  color: #fff;
-}
-.tool svg {
+.dock svg,
+.editor header svg {
   width: 18px;
   height: 18px;
+  flex: none;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-#pause svg {
-  fill: currentColor;
-  stroke: none;
-  width: 15px;
-  height: 15px;
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 15px 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background-color 0.2s, color 0.2s;
 }
-#pause .play,
-#pause[aria-pressed='true'] .bars {
-  display: none;
+#shuffle {
+  background: var(--ink);
+  color: #fff;
 }
-#pause[aria-pressed='true'] .play {
-  display: inline;
+#shuffle:hover {
+  background: #2a2a31;
+}
+#shuffle:active svg {
+  rotate: 180deg;
+  transition: rotate 0.3s;
+}
+.pill:not(#shuffle):hover,
+.tool:hover {
+  background: rgb(16 16 20 / 0.06);
+}
+.pill[aria-expanded='true'],
+.tool[aria-pressed='true'] {
+  background: rgb(16 16 20 / 0.1);
+}
+.tool {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+.rule {
+  width: 1px;
+  height: 22px;
+  margin: 0 3px;
+  background: var(--hair);
 }
 
-@media (max-width: 700px) {
+/* ---- the editor: a card on the right, or on a phone a sheet from below ---- */
+.editor {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(var(--pad) + 64px);
+  width: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px 16px 18px;
+  overflow-y: auto;
+  border: 1px solid var(--hair);
+  border-radius: 18px;
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 18px 40px -20px rgb(16 16 20 / 0.3);
+  user-select: text;
+  -webkit-user-select: text;
+  animation: slide-in 0.35s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    translate: 14px 0;
+  }
+}
+.editor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.editor h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.editor header button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -6px -6px -6px 0;
+  border-radius: 50%;
+}
+.editor header button:hover {
+  background: rgb(16 16 20 / 0.06);
+}
+.editor .lede {
+  margin: -8px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.editor label,
+.editor fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.editor label > span,
+.editor legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.editor small {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.editor label small {
+  margin-left: 4px;
+}
+.editor :is(input[type='text'], textarea) {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.85);
+  font-size: 13px;
+  line-height: 1.45;
+  resize: none;
+}
+.editor :is(input, textarea)::placeholder {
+  color: rgb(16 16 20 / 0.32);
+}
+.editor :is(input, textarea):focus {
+  outline: 1.5px solid var(--ink);
+  outline-offset: -1px;
+}
+.chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.chips button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.6);
+  font-size: 12.5px;
+  text-align: left;
+}
+.chips button[aria-pressed='true'] {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 0.5px var(--ink);
+  background: #fff;
+}
+.chips i {
+  width: 16px;
+  aspect-ratio: 1;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(16 16 20 / 0.2);
+}
+.chips [data-kind='print'] i {
+  background: radial-gradient(circle, #fff 0 18%, #0000 19%), conic-gradient(#d8dbe2, #f7f8fa, #b9bec9, #f1f2f5, #c8ccd6, #d8dbe2);
+}
+.chips [data-kind='holo'] i {
+  background: radial-gradient(circle, #fff 0 18%, #0000 19%), conic-gradient(#111 0 20%, #3be08a, #f5d24a, #111 45% 70%, #9b6bff, #111);
+}
+.chips [data-kind='gold'] i {
+  background: radial-gradient(circle, #111 0 30%, #0000 31%), conic-gradient(#b98a2c, #f7dd8f, #a8781c, #f3cf72, #b98a2c);
+}
+.chips [data-kind='vinyl'] i {
+  background: radial-gradient(circle, #e2574c 0 34%, #0000 35%), repeating-radial-gradient(circle, #111 0 1.5px, #2b2b2b 1.5px 2.5px);
+}
+.editor .row {
+  display: flex;
+  gap: 6px;
+}
+.plain {
+  padding: 8px 12px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.6);
+  font-size: 12.5px;
+}
+.plain:hover,
+.chips button:hover {
+  background: #fff;
+}
+.plain.wide {
+  margin-top: auto;
+  color: var(--ink-soft);
+}
+
+/* shown while a file is being dragged over the window */
+.drop {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed rgb(16 16 20 / 0.35);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.7);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+.drop p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--pad) + 76px);
+  translate: -50% 8px;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12.5px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, translate 0.25s;
+}
+.toast.on {
+  opacity: 1;
+  translate: -50% 0;
+}
+
+@media (max-width: 760px) {
   :root {
-    --pad: max(14px, env(safe-area-inset-bottom));
-    --thumb: 42px;
-    --tool: 38px;
+    --pad: max(12px, env(safe-area-inset-bottom));
   }
-  .dock {
-    gap: 2px;
-    padding: 5px;
+  .pill span {
+    display: none;
   }
-  .rail {
-    gap: 1px;
-    padding-inline: 8px;
-    mask-image: linear-gradient(90deg, #0000, #000 12px calc(100% - 12px), #0000);
-    -webkit-mask-image: linear-gradient(90deg, #0000, #000 12px calc(100% - 12px), #0000);
+  .pill {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+  #shuffle span {
+    display: inline;
+  }
+  #shuffle {
+    width: auto;
+    padding: 0 14px 0 11px;
   }
   .hint {
-    bottom: calc(var(--pad) + 68px);
+    bottom: calc(var(--pad) + 62px);
     font-size: 11px;
+  }
+  .editor {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--pad) + 58px);
+    width: auto;
+    max-height: 46vh;
+    animation-name: rise;
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 14px;
+    }
+  }
+  .plain.wide {
+    margin-top: 0;
+  }
+  [data-editing] .hint {
+    opacity: 0;
   }
 }

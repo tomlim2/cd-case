@@ -257,6 +257,32 @@ export function mergeSlabs(parts) {
   return g;
 }
 
+/* ---------------------------------------------------------------- paper */
+
+// A flat printed sheet with rounded corners at height z, mapped so a square picture fills it.
+export function paperGeometry(half, corner, z) {
+  const outline = roundSquare(half, corner);
+  const shape = new THREE.Shape(outline.map(([x, y]) => new THREE.Vector2(x, y)));
+  const flat = new THREE.ShapeGeometry(shape, 1);
+  const P = flat.attributes.position;
+  const pos = [];
+  const nrm = [];
+  const uv = [];
+  for (let i = 0; i < P.count; i++) {
+    pos.push(P.getX(i), P.getY(i), z);
+    nrm.push(0, 0, 1);
+    uv.push((P.getX(i) + half) / (2 * half), (P.getY(i) + half) / (2 * half));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(Array.from(flat.index.array));
+  g.computeBoundingSphere();
+  flat.dispose();
+  return g;
+}
+
 /* ---------------------------------------------------------------- disc */
 
 // An annulus with a printed face (aFace 0), a data side (1) and its two edges (2).
