@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>CD Case</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <header class="credit">
+    <small>three.js · shader study</small>
+    <strong>CD <em>Case</em></strong>
+    <small>모작 — clear plastic jewel case</small>
+  </header>
+  <p class="hint" id="hint">케이스를 탭해서 열기 · 드래그해서 돌리기</p>
+  <nav class="dock" aria-label="controls">
+    <button class="thumb is-on" data-i="0" title="Stickers"><canvas width="112" height="112"></canvas></button>
+    <button class="thumb" data-i="1" title="Gold"><canvas width="112" height="112"></canvas></button>
+    <button class="thumb" data-i="2" title="Rose"><canvas width="112" height="112"></canvas></button>
+    <button class="thumb" data-i="3" title="Swirl"><canvas width="112" height="112"></canvas></button>
+    <span class="sep"></span>
+    <button class="round dark" id="btnOpen" title="열기 / 닫기">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6"/></svg>
+    </button>
+    <button class="round" id="btnReset" title="시점 초기화">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M9 5v14"/></svg>
+    </button>
+    <button class="round" id="btnSpin" title="디스크 회전 on/off">
+      <svg id="icoPause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    </button>
+  </nav>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
